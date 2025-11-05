@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sys; print(sys.version); print(sys.executable)\")",
+      "Bash(pip show NREL-PySAM)",
+      "Bash(python -c \"import PySAM; print(''PySAM imported successfully''); print(PySAM.__version__)\")",
+      "Bash(python -c \"import PySAM.Pvwattsv8 as pv; print(''PySAM.Pvwattsv8 works'')\")",
+      "Bash(python -c \"from hopp.simulation import HoppInterface; print(''HOPP imports work'')\")",
+      "Bash(python -c \"import yaml; print(''PyYAML works'')\")",
+      "Bash(pip show hopp)",
+      "Bash(pip check)",
+      "Bash(pip show pyyaml-include)",
+      "Bash(python -c \"import pyyaml_include; print(''pyyaml-include works'')\")",
+      "Bash(NUL)",
+      "Bash(dir /s /b /ad)",
+      "Bash(findstr:*)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
+      "Bash(cat:*)",
+      "Bash(tree:*)",
+      "Bash(python:*)",
+      "Bash(pip show:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
