@@ -8,9 +8,10 @@ This is an enhanced fork of NREL's Hybrid Optimization and Performance Platform 
 
 Key enhancements over base HOPP:
 - Multi-wind farm support via `MultiWindPlant` class allowing simulation of multiple geographically distributed wind farms
-- Advanced optimization algorithms (Nelder-Mead, Differential Evolution, Genetic Algorithms) in `hopp/tools/optimization/`
+- Advanced optimization algorithms (Nelder-Mead, Differential Evolution, Genetic Algorithms) in `hopp/optimization/`
 - Parallel processing optimization with LRU caching
-- Custom system optimizer in `hopp/tools/optimization/system_optimizer.py`
+- Custom system optimizer in `hopp/optimization/system_optimizer.py`
+- Standalone optimization test scripts (`test.py`, `test2.py`) demonstrating real-world optimization scenarios
 
 ## Development Commands
 
@@ -32,7 +33,8 @@ pip install -e ".[examples]"
 
 ### Testing
 ```bash
-# Run full test suite
+# Run full test suite (if test directory exists)
+# Note: The pyproject.toml specifies test paths as test/hopp/ and test/greenheart/
 pytest tests/hopp
 
 # Run specific test module
@@ -48,6 +50,8 @@ pytest tests/hopp -v
 pytest tests/hopp/test_battery_dispatch.py::test_battery_dispatch
 ```
 
+**Note**: If tests are not found, verify the test directory structure matches pyproject.toml configuration (test/hopp/ or tests/hopp/).
+
 ### Documentation
 ```bash
 # Build documentation (Jupyter Book format)
@@ -60,10 +64,25 @@ jupyter-book build docs/
 ```bash
 # Run standalone optimization test scripts
 python test.py              # Comprehensive hybrid optimization with multi-wind ratios
-python test2.py             # Dual-location wind farm optimization
+                           # - Optimizes for multiple demand-met targets (75%, 80%, 85%, etc.)
+                           # - Tests various turbine distribution ratios between sub-farms
+                           # - Outputs results to Excel with organized worksheets
+                           # - Uses LRU caching for performance
+
+python test2.py             # Dual-location wind farm demonstration
+                           # - Downloads wind/solar resource data for separate locations
+                           # - Demonstrates MultiWindPlant configuration
+                           # - Includes visualization of generation profiles
+                           # - Shows battery dispatch optimization
 
 # Run Jupyter notebooks
 jupyter lab examples/       # Opens example notebooks in browser
+```
+
+**Security Note**: Both test scripts contain hardcoded NREL API keys. For production use, always use environment variables or .env files instead:
+```bash
+export NREL_API_KEY=your_key_here
+export NREL_API_EMAIL=your.email@example.com
 ```
 
 ## Architecture Overview
@@ -75,6 +94,19 @@ jupyter lab examples/       # Opens example notebooks in browser
 - Coordinates simulation sequence: `simulate_power` → `calculate_installed_cost` → `calculate_financials` → `simulate_financials`
 - Uses PySAM models under the hood for energy calculations
 - Configuration driven via YAML files (see `examples/inputs/*.yaml`)
+
+**HoppInterface** (`hopp/simulation/hopp_interface.py`):
+- High-level wrapper around HybridSimulation for easy initialization from YAML
+- Primary entry point for running simulations
+- Usage pattern:
+  ```python
+  from hopp.simulation import HoppInterface
+
+  hi = HoppInterface("config.yaml")
+  hi.simulate(project_life=25)  # Run 25-year simulation
+  hybrid_plant = hi.system       # Access HybridSimulation instance
+  ```
+- Automatically loads configuration, initializes technologies, and sets up site information
 
 **Technology Hierarchy**:
 ```
@@ -106,20 +138,25 @@ Key design: `HybridSimulation` calls `simulate_power()` on each power source seq
 
 ### Optimization Architecture
 
-**SystemOptimizer** (`hopp/tools/optimization/system_optimizer.py`):
+**SystemOptimizer** (`hopp/optimization/system_optimizer.py`):
 - High-level interface for optimizing hybrid system configurations
 - Supports three optimization methods:
-  - `optimize_system()` - Nelder-Mead simplex method
+  - `optimize_system()` - Nelder-Mead simplex method (scipy.optimize.minimize)
   - `optimize_system_de()` - Differential Evolution
   - `optimize_system_ga()` - Genetic Algorithm
 - Optimizes system parameters: PV size, wind turbines, battery capacity (kWh/kW), grid interconnect
 - Integrates with `LoadAnalyzer` for demand-met targets and flexible load modeling
 - Uses `EconomicCalculator` for LCOE and financial metrics
+- Key methods:
+  - `set_turbine_ratio(ratio)` - Sets turbine distribution ratio for multi-wind farms
+  - `objective_function(x)` - Calculates LCOE and system metrics
+  - `penalized_objective(x)` - Adds penalty terms for constraint violations
+  - `round_battery_capacity(capacity)` - Rounds to nearest MWh (1000 kWh increments)
 
-**Optimization Framework** (`hopp/tools/optimization/optimizer/`):
+**Optimization Framework** (`hopp/optimization/optimizer/`):
 - Multiple optimizer implementations: CEM, DCEM, CMA-ES, GA, SPSA, and variants (IDCEM, IPDCEM, IWDCEM, KFDCEM)
 - Ask-tell interface for parallel optimization (`ask_tell_optimizer.py`)
-- Driver classes (`hopp/tools/optimization/driver/`) for serial and parallel execution
+- Driver classes (`hopp/optimization/driver/`) for serial and parallel execution
 
 ### Dispatch Optimization
 
@@ -161,6 +198,22 @@ Key design: `HybridSimulation` calls `simulate_power()` on each power source seq
 - Requires `NREL_API_KEY` and `NREL_API_EMAIL` environment variables
 - Caches data locally in `hopp/simulation/resource_files/`
 - Supports custom resource files (CSV format with specific column structure)
+- Methods:
+  - `download_solar_data(latitude, longitude, year)` - Downloads NSRDB solar resource data
+  - `download_wind_data(latitude, longitude, start_date, end_date)` - Downloads Wind Toolkit data
+
+### Load Analysis
+
+**LoadAnalyzer** (`hopp/optimization/load_analyzer.py`):
+- Analyzes system performance against load requirements
+- Supports flexible load modeling with configurable load reduction
+- Integrates with `SystemOptimizer` for demand-met target optimization
+- Key parameters:
+  - `enable_flexible_load` - Allows load to be reduced during optimization
+  - `max_load_reduction_percentage` - Maximum allowable load reduction (e.g., 0.2 = 20%)
+- Methods:
+  - `calculate_performance_metrics(df, project_lifetime)` - Calculates demand-met percentage, load served, etc.
+  - Returns metrics including: Total Load Served, Demand Met %, Excess Generation, etc.
 
 ## Important Design Patterns
 
@@ -200,6 +253,42 @@ Battery capacity is rounded to nearest MWh (1000 kWh increments). All parameters
 - Parallel optimization benefits significantly from caching repeated evaluations
 
 ## Common Workflows
+
+### Optimizing Multi-Wind Farm Configurations
+To optimize hybrid systems with multiple wind farms and varying turbine distributions:
+
+```python
+from hopp.optimization.system_optimizer import SystemOptimizer
+from hopp.tools.analysis import EconomicCalculator
+
+# Initialize optimizer
+optimizer = SystemOptimizer(
+    yaml_file_path="config.yaml",
+    economic_calculator=EconomicCalculator(project_lifetime=25),
+    enable_flexible_load=False
+)
+
+# Set turbine distribution ratio between sub-farms
+# e.g., 0.4 means 40% of total turbines in first farm, 60% in second
+optimizer.set_turbine_ratio(0.4)
+
+# Define optimization bounds: [pv_kw, num_turbines, battery_kwh, battery_kw, grid_kw]
+bounds = [(0, 100000), (0, 100), (0, 50000), (0, 10000), (0, 150000)]
+
+# Run optimization
+result = optimizer.optimize_system(bounds, initial_conditions=[[10000, 20, 5000, 1000, 50000]])
+
+# Access results
+print(f"Optimal PV: {result['PV Capacity (kW)']} kW")
+print(f"Optimal Wind: {result['Wind Turbine Capacity (kW)']} kW")
+print(f"LCOE: {result['LCOE ($/kWh)']} $/kWh")
+```
+
+**Key Implementation Details**:
+- The optimizer updates `config['technologies']['wind']['sub_num_turbines'][0]` based on the ratio
+- Battery capacity is rounded to nearest MWh (1000 kWh) increments
+- Configuration is saved to YAML file between iterations
+- LRU caching can significantly improve performance for repeated evaluations
 
 ### Adding a New Technology
 1. Create class in `hopp/simulation/technologies/<tech_name>/`
@@ -256,22 +345,34 @@ Never commit `.env` files. They are git-ignored by default.
 
 ## Dependencies and Solver Requirements
 
+- **Python**: 3.10-3.11 required (3.12+ not officially supported due to PySAM constraints)
+  - **Warning**: If using Python 3.13+, you may encounter compatibility issues with PySAM
+  - Use conda to create environment with specific Python version: `conda create --name hopp python=3.11`
 - **PySAM** (>=6.0.0): NREL's System Advisor Model Python wrapper, core simulation engine
-- **Pyomo** (>=6.1.2): Optimization modeling, used for dispatch
+- **Pyomo** (>=6.1.2): Optimization modeling, used for dispatch optimization
 - **FLORIS** (>=4.0): Wind farm wake modeling (optional, for advanced wind modeling)
 - **CBC/GLPK**: MILP solvers for dispatch optimization (must be conda-installed, not pip)
-- Python 3.10-3.11 only (3.12+ not supported due to PySAM constraints)
+  - Install via: `conda install -y -c conda-forge coin-or-cbc=2.10.8 glpk`
+- **pyyaml-include**: Enables `!include` directives in YAML configuration files
+- **attrs**: Used for configuration class definitions with validation
 
 ## File Organization
 
-- `hopp/simulation/technologies/` - Power source implementations
-- `hopp/tools/optimization/` - Optimization algorithms and system optimizer
-- `hopp/tools/analysis/` - Economic calculators, BOS costing
-- `hopp/tools/layout/` - Flicker analysis, layout optimization
-- `hopp/tools/resource/` - Resource data fetching and processing
+- `hopp/simulation/` - Core simulation engine and hybrid orchestration
+  - `hopp/simulation/technologies/` - Power source implementations (PV, wind, battery, CSP, etc.)
+  - `hopp/simulation/resource_files/` - Resource data manager and cached resource files
+- `hopp/optimization/` - Optimization algorithms, system optimizer, and load analyzer
+  - `hopp/optimization/optimizer/` - Advanced optimization algorithms (GA, CEM, DCEM, CMA-ES, SPSA)
+  - `hopp/optimization/driver/` - Serial and parallel optimization drivers
+- `hopp/tools/` - Analysis and utility tools
+  - `hopp/tools/analysis/` - Economic calculators, BOS costing
+  - `hopp/tools/layout/` - Flicker analysis, layout optimization
+  - `hopp/tools/dispatch/` - Dispatch plotting tools
+- `hopp/utilities/` - Configuration management and helper utilities
 - `examples/` - Jupyter notebooks demonstrating features
 - `examples/inputs/` - YAML configuration files
-- `tests/hopp/` - Test suite
+- `test.py`, `test2.py` - Standalone optimization demonstration scripts
+- `tests/hopp/` or `test/hopp/` - Test suite (location may vary)
 - `output/` and `log/` - Runtime outputs (git-ignored)
 
 ## Output and Results Structure
@@ -290,13 +391,30 @@ When working with results, note:
 
 ## Known Issues and Gotchas
 
+- **Python Version Compatibility**:
+  - Project specifies Python 3.10-3.11, but some environments may have 3.13+
+  - PySAM may not work correctly with Python 3.12+
+  - Always use conda to create environment with correct Python version
 - **Windows CBC**: Manual installation required on Windows (conda install may not work)
+  - See: https://github.com/coin-or/Cbc for manual installation instructions
 - **Cache invalidation**: LRU cache in optimization scripts doesn't track YAML config changes
+  - If you modify YAML files directly, clear cache or restart Python session
 - **API rate limits**: NREL API has rate limits, cache resource files locally
+  - Downloaded files are cached in `hopp/simulation/resource_files/`
+- **Hardcoded API Keys**: test.py and test2.py contain hardcoded API keys
+  - Remove these before committing or sharing code
+  - Use environment variables instead
 - **Memory usage**: Large optimization runs can consume significant memory, especially with parallel evaluation
+  - Monitor memory usage with large turbine counts or long simulation periods
 - **YAML includes**: Relative paths in `!include` directives are relative to the including file
+  - Use absolute paths or ensure correct relative path from YAML file location
 - **Battery rounding**: SystemOptimizer rounds battery capacity to nearest MWh, which may affect optimal solutions
+  - This is intentional to avoid overly precise capacity values
 - **Dispatch convergence**: Some configurations may cause dispatch optimization to be infeasible, check solver status
+  - Ensure battery capacity and grid interconnect are reasonable for the load
+- **Excel Output Limitations**: test.py uses openpyxl for Excel output
+  - Worksheet names are limited to 31 characters
+  - Large result sets may cause Excel file size to grow significantly
 
 ## Configuration Validation
 
@@ -311,6 +429,89 @@ When creating new YAML configs:
 
 - Use parallel optimization drivers for expensive objective functions
 - Cache simulation results when evaluating similar configurations
+  - Example: `from functools import lru_cache` with `@lru_cache(maxsize=None)`
 - Reduce time resolution for initial optimization sweeps (use representative days)
 - Profile optimization scripts to identify bottlenecks (often in PySAM calls)
 - Consider surrogate models for nested optimization problems
+- Use `run_in_background=True` for long-running simulations if monitoring output
+
+## Quick Reference
+
+### Essential Import Patterns
+```python
+from hopp.simulation import HoppInterface
+from hopp.optimization.system_optimizer import SystemOptimizer
+from hopp.optimization.load_analyzer import LoadAnalyzer
+from hopp.tools.analysis import EconomicCalculator
+from hopp.utilities.config_manager import ConfigManager
+from hopp.simulation.resource_files import ResourceDataManager
+from hopp.utilities.keys import set_developer_nrel_gov_key
+```
+
+### Common Configuration Paths
+- Optimization parameters: `config['technologies'][<tech>]['<param>']`
+- Site location: `config['site']['data']['lat']`, `config['site']['data']['lon']`
+- Resource files: `config['site']['solar_resource_file']`, `config['site']['wind_resource_files']`
+- Load profile: `config['site']['desired_schedule']`
+- Grid interconnect: `config['technologies']['grid']['interconnect_kw']`
+
+### Accessing Simulation Results
+```python
+hi = HoppInterface("config.yaml")
+hi.simulate(25)
+plant = hi.system
+
+# Generation profiles (hourly kW arrays)
+pv_gen = plant.generation_profile.pv
+wind_gen = plant.generation_profile.wind
+battery_gen = plant.generation_profile.battery
+grid_gen = plant.generation_profile.grid
+
+# Total generation (kWh)
+total_pv = np.sum(plant.generation_profile.pv)
+
+# Capacity factors
+pv_cf = plant.pv.capacity_factor
+wind_cf = plant.wind.capacity_factor
+
+# Financial metrics
+lcoe = plant.grid.financial_model.Outputs.lcoe_nom  # or via EconomicCalculator
+npv = plant.grid.financial_model.Outputs.project_return_aftertax_npv
+```
+
+### Multi-Wind Farm Configuration Pattern
+```yaml
+technologies:
+  wind:
+    model_name: multi_wind  # Critical: triggers MultiWindPlant
+    num_turbines: 30  # Total turbines across all farms
+    sub_num_turbines: [12, 18]  # Distribution: 12 in farm 1, 18 in farm 2
+    sub_hub_heights: [90, 100]  # Different hub heights per farm
+    sub_lats: [39.7, 40.1]  # Separate locations
+    sub_lons: [-105.2, -104.8]
+
+site:
+  wind_resource_files:  # List of resource files
+    - path/to/site1_wind.csv
+    - path/to/site2_wind.csv
+```
+
+### Optimization Vector Format
+```python
+# Standard format used by SystemOptimizer
+x = [
+    pv_size_kw,           # Index 0: PV system capacity
+    num_turbines,         # Index 1: Total wind turbines
+    battery_kwh,          # Index 2: Battery energy capacity (rounded to MWh)
+    battery_kw,           # Index 3: Battery power capacity
+    grid_interconnect_kw  # Index 4: Grid interconnection limit
+]
+```
+
+### Troubleshooting Checklist
+1. **Import errors**: Check Python version (should be 3.10 or 3.11)
+2. **Simulation fails**: Verify YAML configuration has all required fields
+3. **Resource download fails**: Check NREL API key environment variables
+4. **Dispatch optimization fails**: Ensure CBC/GLPK solver installed via conda
+5. **Results seem wrong**: Check that battery rounding isn't affecting optimization
+6. **Memory issues**: Reduce simulation timesteps or use smaller turbine counts for testing
