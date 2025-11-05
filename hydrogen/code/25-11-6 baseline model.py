@@ -1,11 +1,11 @@
-#%% Define key input/output paths
+
 import os
 import glob
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
-
+#%% Define key input/output paths
 # Automatically locate project root (folder containing this script)
 current_path = os.path.dirname(os.path.abspath(__file__))
 project_path = os.path.dirname(current_path)
