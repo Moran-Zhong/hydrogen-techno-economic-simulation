@@ -50,3 +50,19 @@ jobs:
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
+- name: Build HTML Docs
+  run: |
+    pip install -r requirements.txt
+    cd docs
+    make html
+
+- name: Export Docs
+  if: success() && exists('docs/_build/html/index.html')
+  run: echo "Docs built successfully"
+
+- name: Archive artifact
+  uses: actions/upload-artifact@v3
+  with:
+    name: docs-html
+    path: docs/_build/html
+
