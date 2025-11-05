@@ -866,7 +866,11 @@ ax.scatter([PARAMS_VIC['CAPEX']], [metrics_vic['lcoh_$/kg']],
 ax.set_xlabel('CAPEX ($/kW)')
 ax.set_ylabel('LCOH ($/kg H₂)')
 ax.set_title('VIC: LCOH Sensitivity to CAPEX and H₂ Price')
-ax.legend(loc='best')
+ax.legend(
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.25),
+    ncol=3,
+)
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
@@ -934,7 +938,11 @@ ax.set_xlabel('CAPEX ($/kW)')
 ax.set_ylabel('Utilization Factor (%)')
 ax.set_title('VIC: Utilization Sensitivity to CAPEX and H₂ Price')
 ax.set_ylim(0, 100)
-ax.legend(loc='best')
+ax.legend(
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.25),
+    ncol=3
+)
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
@@ -1014,7 +1022,11 @@ ax.scatter([PARAMS_QLD['CAPEX']], [metrics_qld['lcoh_$/kg']],
 ax.set_xlabel('CAPEX ($/kW)')
 ax.set_ylabel('LCOH ($/kg H₂)')
 ax.set_title('QLD: LCOH Sensitivity to CAPEX and H₂ Price')
-ax.legend(loc='best')
+ax.legend(
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.25),
+    ncol=3,
+)
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
@@ -1076,7 +1088,11 @@ ax.set_xlabel('CAPEX ($/kW)')
 ax.set_ylabel('Utilization Factor (%)')
 ax.set_title('QLD: Utilization Sensitivity to CAPEX and H₂ Price')
 ax.set_ylim(0, 100)
-ax.legend(loc='best')
+ax.legend(
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.25),
+    ncol=3
+)
 ax.grid(True, alpha=0.3)
 
 plt.tight_layout()
