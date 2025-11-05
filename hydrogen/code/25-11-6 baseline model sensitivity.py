@@ -13,7 +13,8 @@ project_path = os.path.dirname(current_path)
 
 # Define subfolders relative to project root
 data_path = os.path.join(project_path, 'data')
-results_path = os.path.join(project_path, 'results')
+timestamp = datetime.now().strftime("%Y-%m-%d")
+results_path = os.path.join(project_path, 'results', timestamp)
 
 rrp_path_VIC  = os.path.join(data_path, 'AEMO RRP data', 'VIC 2023 data')
 rrp_files_VIC = glob.glob(os.path.join(rrp_path_VIC, "PRICE_AND_DEMAND_2023**_VIC1.csv"))
