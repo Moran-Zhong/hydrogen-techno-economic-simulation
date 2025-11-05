@@ -17,7 +17,7 @@ from tests.hopp.utils import DEFAULT_FIN_CONFIG
 
 solar_resource_file = ROOT_DIR / "simulation" / "resource_files" / "solar" / "35.2018863_-101.945027_psmv3_60_2012.csv"
 wind_resource_file = ROOT_DIR / "simulation" / "resource_files" / "wind" / "35.2018863_-101.945027_windtoolkit_2012_60min_80m_100m.srw"
-site = SiteInfo(flatirons_site, solar_resource_file=solar_resource_file, wind_resource_file=wind_resource_file)
+site = SiteInfo(flatirons_site, solar_resource_file=solar_resource_file)#wind_resource_file=wind_resource_file)
 
 interconnect_mw = 50
 technologies_input = {
