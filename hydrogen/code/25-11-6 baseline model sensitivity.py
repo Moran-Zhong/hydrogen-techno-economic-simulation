@@ -57,7 +57,7 @@ PARAMS_VIC = {
     'CAPEX': 950,              # $/kW
     'LIFETIME_HOURS': 80000,   # hours (~9.1 years)
     'EFFICIENCY': 49,          # kWh/kg H₂ (LHV basis)
-    'VOM': 4.5,               # $/MWh
+    'VOM': 4.5,               # $/MWh variable O&M
     'H2_PRICE': 5.0,          # $/kg
     'CAPACITY_MW': 100         # MW
 }
