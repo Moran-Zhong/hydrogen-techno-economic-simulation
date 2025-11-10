@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an enhanced fork of NREL's Hybrid Optimization and Performance Platform (HOPP) with advanced multi-wind farm simulation and optimization capabilities. The codebase combines renewable energy system modeling (wind, solar, battery, CSP) with sophisticated optimization algorithms for hybrid plant design and operation.
+This is an enhanced fork of NREL's Hybrid Optimization and Performance Platform (HOPP) with advanced multi-wind farm simulation, optimization capabilities, and hydrogen techno-economic modeling. The codebase combines renewable energy system modeling (wind, solar, battery, CSP) with sophisticated optimization algorithms for hybrid plant design and operation.
 
 Key enhancements over base HOPP:
 - Multi-wind farm support via `MultiWindPlant` class allowing simulation of multiple geographically distributed wind farms
@@ -12,6 +12,7 @@ Key enhancements over base HOPP:
 - Parallel processing optimization with LRU caching
 - Custom system optimizer in `hopp/optimization/system_optimizer.py`
 - Standalone optimization test scripts (`test.py`, `test2.py`) demonstrating real-world optimization scenarios
+- **Hydrogen techno-economic modeling** in `hydrogen/` directory for grid-connected electrolyser analysis with AEMO pricing data
 
 ## Development Commands
 
@@ -33,24 +34,24 @@ pip install -e ".[examples]"
 
 ### Testing
 ```bash
-# Run full test suite (if test directory exists)
+# Run full test suite
 # Note: The pyproject.toml specifies test paths as test/hopp/ and test/greenheart/
-pytest tests/hopp
+pytest test/hopp
 
 # Run specific test module
-pytest tests/hopp/test_hybrid.py
+pytest test/hopp/test_hybrid.py
 
 # Run tests matching pattern
-pytest tests/hopp/test_layout.py -k multi_wind
+pytest test/hopp/test_layout.py -k multi_wind
 
 # Run with verbose output
-pytest tests/hopp -v
+pytest test/hopp -v
 
 # Run single test function
-pytest tests/hopp/test_battery_dispatch.py::test_battery_dispatch
+pytest test/hopp/test_battery_dispatch.py::test_battery_dispatch
 ```
 
-**Note**: If tests are not found, verify the test directory structure matches pyproject.toml configuration (test/hopp/ or tests/hopp/).
+**Important**: This project uses `test/hopp/` (not `tests/hopp/`) as specified in pyproject.toml. If the test directory doesn't exist yet, tests may need to be created.
 
 ### Documentation
 ```bash
@@ -215,6 +216,37 @@ Key design: `HybridSimulation` calls `simulate_power()` on each power source seq
   - `calculate_performance_metrics(df, project_lifetime)` - Calculates demand-met percentage, load served, etc.
   - Returns metrics including: Total Load Served, Demand Met %, Excess Generation, etc.
 
+### Hydrogen Techno-Economic Modeling
+
+**Separate from HOPP Core** - The `hydrogen/` directory contains standalone analysis scripts:
+
+**Architecture**:
+- **Not integrated with HOPP simulation engine** - runs independently
+- Uses pandas for data manipulation and analysis
+- Reads AEMO (Australian Energy Market Operator) spot price data from CSV files
+- Calculates electrolyser economics based on grid electricity prices
+
+**Key Components** (`hydrogen/code/`):
+- Region-specific parameter definitions (VIC, QLD) including:
+  - CAPEX ($/kW)
+  - Lifetime (hours)
+  - Efficiency (kWh/kg H₂)
+  - Variable O&M ($/MWh)
+  - Hydrogen selling price ($/kg)
+- Price threshold optimization for electrolyser dispatch
+- LCOH calculation with component breakdown (electricity, depreciation, VOM)
+- Utilization analysis and sensitivity studies
+
+**Data Requirements**:
+- AEMO RRP data in `hydrogen/data/AEMO RRP data/[REGION] [YEAR] data/`
+- CSV format with columns: `SETTLEMENTDATE`, `RRP` (Regional Reference Price in $/MWh)
+- Files named like `PRICE_AND_DEMAND_[YEAR]**_[REGION].csv`
+
+**Output**:
+- Results saved to `hydrogen/results/`
+- Includes utilization metrics, cost breakdowns, and validation checks
+- Matplotlib visualizations of price distributions and operating strategies
+
 ## Important Design Patterns
 
 ### Technology Simulation Flow
@@ -321,6 +353,40 @@ To modify dispatch logic:
 - Add new decision variables to Pyomo model
 - Update port connections if changing power flow topology
 
+### Working with Hydrogen Models
+
+The hydrogen scripts are **separate from HOPP** and use a different architecture:
+
+```python
+# Example: Modifying electrolyser parameters for a new region
+PARAMS_NEW_REGION = {
+    'CAPEX': 1000,              # $/kW - electrolyser capital cost
+    'LIFETIME_HOURS': 80000,    # hours of operation before replacement
+    'EFFICIENCY': 50,           # kWh/kg H₂ (LHV basis)
+    'VOM': 5.0,                # $/MWh - variable O&M
+    'H2_PRICE': 5.5,           # $/kg - hydrogen selling price
+    'CAPACITY_MW': 100         # MW - electrolyser rated capacity
+}
+
+# Calculate depreciation per MWh
+depreciation_per_mwh = (PARAMS_NEW_REGION['CAPEX'] * PARAMS_NEW_REGION['CAPACITY_MW'] * 1000) / \
+                       (PARAMS_NEW_REGION['LIFETIME_HOURS'] / 1000)
+```
+
+**Key workflow steps**:
+1. Load AEMO RRP data for the region of interest
+2. Define electrolyser parameters (CAPEX, efficiency, lifetime)
+3. Iterate over price thresholds to find optimal dispatch strategy
+4. Calculate LCOH including electricity, depreciation, and O&M costs
+5. Run sensitivity analysis on key parameters
+6. Export results to `hydrogen/results/` for visualization
+
+**Important notes**:
+- Hydrogen models do not use YAML configuration files
+- No integration with HOPP's HybridSimulation or optimization framework
+- Suitable for grid-connected electrolyser analysis with time-varying electricity prices
+- For renewable-powered hydrogen (PV+Wind+Electrolyser), use HOPP's main simulation engine instead
+
 ### NREL API Key Setup
 Resource downloads require API credentials:
 ```bash
@@ -334,14 +400,37 @@ echo "NREL_API_EMAIL=your.email@example.com" >> .env
 ```
 Never commit `.env` files. They are git-ignored by default.
 
+### Running Hydrogen Analysis Scripts
+The `hydrogen/` directory contains standalone techno-economic analysis for grid-connected electrolysers:
+
+```bash
+# Navigate to hydrogen code directory
+cd hydrogen/code
+
+# Run baseline model for AEMO regions (VIC and QLD)
+python "25-11-6 baseline model.py"
+
+# Run sensitivity analysis on electrolyser parameters
+python "25-11-6 baseline model sensitivity.py"
+```
+
+**Key features of hydrogen scripts**:
+- Analyzes grid-connected electrolyser economics using AEMO spot pricing data
+- Calculates Levelized Cost of Hydrogen (LCOH) with breakdown by electricity, depreciation, and O&M
+- Region-specific parameters for Victoria (VIC) and Queensland (QLD)
+- Optimizes electrolyser dispatch based on electricity price thresholds
+- Outputs include utilization rates, hydrogen production volumes, and cost metrics
+- Requires AEMO RRP (Regional Reference Price) CSV files in `hydrogen/data/AEMO RRP data/`
+
 ## Testing Considerations
 
-- Mock API responses are in `tests/hopp/api_responses/` - use for tests requiring external data
-- Input fixtures (YAML configs, resource CSVs) live in `tests/hopp/inputs/`
+- Mock API responses should be in `test/hopp/api_responses/` (if directory exists) - use for tests requiring external data
+- Input fixtures (YAML configs, resource CSVs) should live in `test/hopp/inputs/`
 - Tests should clean up any output files created
 - Use `pytest.mark.dependency` for tests with prerequisites
 - Use `pytest.mark.parametrize` for testing multiple configurations
 - Long-running optimization tests should have shorter variants or be marked for optional runs
+- **Note**: Test directory (`test/hopp/`) may not exist yet - check before running tests
 
 ## Dependencies and Solver Requirements
 
@@ -360,8 +449,11 @@ Never commit `.env` files. They are git-ignored by default.
 
 - `hopp/simulation/` - Core simulation engine and hybrid orchestration
   - `hopp/simulation/technologies/` - Power source implementations (PV, wind, battery, CSP, etc.)
+    - `hopp/simulation/technologies/wind/` - Wind plant implementations including `MultiWindPlant`
   - `hopp/simulation/resource_files/` - Resource data manager and cached resource files
 - `hopp/optimization/` - Optimization algorithms, system optimizer, and load analyzer
+  - `hopp/optimization/system_optimizer.py` - Main system optimization interface
+  - `hopp/optimization/load_analyzer.py` - Load analysis with flexible demand management
   - `hopp/optimization/optimizer/` - Advanced optimization algorithms (GA, CEM, DCEM, CMA-ES, SPSA)
   - `hopp/optimization/driver/` - Serial and parallel optimization drivers
 - `hopp/tools/` - Analysis and utility tools
@@ -369,10 +461,14 @@ Never commit `.env` files. They are git-ignored by default.
   - `hopp/tools/layout/` - Flicker analysis, layout optimization
   - `hopp/tools/dispatch/` - Dispatch plotting tools
 - `hopp/utilities/` - Configuration management and helper utilities
+- `hydrogen/` - **Hydrogen techno-economic modeling (separate from HOPP base)**
+  - `hydrogen/code/` - Electrolyser analysis scripts for grid-connected hydrogen production
+  - `hydrogen/data/` - AEMO Regional Reference Price (RRP) data for VIC/QLD regions
+  - `hydrogen/results/` - Analysis outputs and visualizations
 - `examples/` - Jupyter notebooks demonstrating features
 - `examples/inputs/` - YAML configuration files
 - `test.py`, `test2.py` - Standalone optimization demonstration scripts
-- `tests/hopp/` or `test/hopp/` - Test suite (location may vary)
+- `test/hopp/` - Test suite (pyproject.toml specifies this path, not `tests/`)
 - `output/` and `log/` - Runtime outputs (git-ignored)
 
 ## Output and Results Structure
@@ -392,9 +488,14 @@ When working with results, note:
 ## Known Issues and Gotchas
 
 - **Python Version Compatibility**:
-  - Project specifies Python 3.10-3.11, but some environments may have 3.13+
-  - PySAM may not work correctly with Python 3.12+
-  - Always use conda to create environment with correct Python version
+  - Project officially supports Python 3.10-3.11 only (per pyproject.toml: `requires-python = ">=3.10, <3.12"`)
+  - **CRITICAL**: Python 3.12+ and 3.13+ are NOT supported due to PySAM compatibility issues
+  - Current environment may be Python 3.13 - you MUST create a conda environment with Python 3.11 for HOPP to work:
+    ```bash
+    conda create --name hopp python=3.11 -y
+    conda activate hopp
+    ```
+  - Many features will fail or produce incorrect results with Python 3.12+
 - **Windows CBC**: Manual installation required on Windows (conda install may not work)
   - See: https://github.com/coin-or/Cbc for manual installation instructions
 - **Cache invalidation**: LRU cache in optimization scripts doesn't track YAML config changes
@@ -509,9 +610,18 @@ x = [
 ```
 
 ### Troubleshooting Checklist
-1. **Import errors**: Check Python version (should be 3.10 or 3.11)
-2. **Simulation fails**: Verify YAML configuration has all required fields
-3. **Resource download fails**: Check NREL API key environment variables
-4. **Dispatch optimization fails**: Ensure CBC/GLPK solver installed via conda
-5. **Results seem wrong**: Check that battery rounding isn't affecting optimization
-6. **Memory issues**: Reduce simulation timesteps or use smaller turbine counts for testing
+
+**HOPP Simulation Issues**:
+1. **Import errors**: Check Python version (should be 3.10 or 3.11, NOT 3.12+ or 3.13)
+2. **PySAM errors**: Verify you're using Python 3.10 or 3.11 (`python --version`), create new conda env if needed
+3. **Simulation fails**: Verify YAML configuration has all required fields
+4. **Resource download fails**: Check NREL API key environment variables
+5. **Dispatch optimization fails**: Ensure CBC/GLPK solver installed via conda
+6. **Results seem wrong**: Check that battery rounding isn't affecting optimization
+7. **Memory issues**: Reduce simulation timesteps or use smaller turbine counts for testing
+
+**Hydrogen Model Issues**:
+1. **FileNotFoundError for RRP data**: Ensure AEMO CSV files are in `hydrogen/data/AEMO RRP data/[REGION] [YEAR] data/`
+2. **Empty results**: Check that CSV files have correct column names (`SETTLEMENTDATE`, `RRP`)
+3. **LCOH is infinity**: Electrolyser never operates - try higher price threshold or check data
+4. **Script crashes**: Hydrogen scripts don't need HOPP dependencies, but require pandas, numpy, matplotlib

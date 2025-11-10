@@ -20,7 +20,10 @@
       "Bash(tree:*)",
       "Bash(python:*)",
       "Bash(pip show:*)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "WebSearch",
+      "WebFetch(domain:www.csiro.au)",
+      "WebFetch(domain:www.hydrogen.energy.gov)"
     ],
     "deny": [],
     "ask": []
