@@ -1814,14 +1814,219 @@ def plot_monte_carlo_distributions(df_mc, region_name, results_path):
     print(f"  ✓ NPV scatter plot saved")
     plt.close()
 
+    # Plot 7: Correlation Matrix Heatmap (NPV Focus)
+    print(f"  Generating correlation matrix heatmap...")
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    # Select parameters and NPV for correlation analysis
+    params = ['CAPEX', 'EFFICIENCY', 'H2_PRICE', 'LIFETIME_HOURS', 'VOM', 'WACC', 'npv_$m']
+    param_labels = ['CAPEX\n($/kW)', 'Efficiency\n(kWh/kg)', 'H₂ Price\n($/kg)',
+                    'Lifetime\n(hours)', 'VOM\n($/MWh)', 'WACC\n(%)', 'NPV\n($M)']
+
+    # Calculate correlation matrix
+    corr_matrix = df_mc[params].corr()
+
+    # Plot heatmap with diverging colormap (red=negative, blue=positive)
+    im = ax.imshow(corr_matrix, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+
+    # Add colorbar
+    cbar = plt.colorbar(im, ax=ax, label='Correlation Coefficient')
+
+    # Set ticks and labels
+    ax.set_xticks(np.arange(len(params)))
+    ax.set_yticks(np.arange(len(params)))
+    ax.set_xticklabels(param_labels, rotation=45, ha='right')
+    ax.set_yticklabels(param_labels)
+
+    # Add correlation values as text annotations
+    for i in range(len(params)):
+        for j in range(len(params)):
+            corr_val = corr_matrix.iloc[i, j]
+            text_color = 'white' if abs(corr_val) > 0.5 else 'black'
+            ax.text(j, i, f'{corr_val:.2f}',
+                   ha='center', va='center', color=text_color, fontsize=10, fontweight='bold')
+
+    ax.set_title(f'{region_name}: Parameter Correlation Matrix with NPV')
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_correlation_matrix_npv_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ Correlation matrix heatmap saved")
+    plt.close()
+
+    # Plot 8: Multi-Parameter Scatter Grid (2x3) - Each Parameter vs NPV
+    print(f"  Generating multi-parameter scatter grid...")
+    fig, axes = plt.subplots(2, 3, figsize=two_by_two_figsize)
+    axes = axes.flatten()
+
+    # Parameters to plot
+    params_to_plot = ['CAPEX', 'EFFICIENCY', 'H2_PRICE', 'LIFETIME_HOURS', 'VOM', 'WACC']
+    param_labels_plot = ['CAPEX ($/kW)', 'Efficiency (kWh/kg)', 'H₂ Price ($/kg)',
+                         'Lifetime (hours)', 'VOM ($/MWh)', 'WACC (%)']
+
+    for idx, (param, label) in enumerate(zip(params_to_plot, param_labels_plot)):
+        ax = axes[idx]
+
+        # Scatter plot
+        ax.scatter(df_mc[param], df_mc['npv_$m'], alpha=0.4, s=20, c='steelblue', edgecolors='none')
+
+        # Calculate and plot regression line
+        z = np.polyfit(df_mc[param], df_mc['npv_$m'], 1)
+        p = np.poly1d(z)
+        x_trend = np.linspace(df_mc[param].min(), df_mc[param].max(), 100)
+        ax.plot(x_trend, p(x_trend), 'r-', linewidth=2)
+
+        # Calculate R² value
+        y_pred = p(df_mc[param])
+        ss_res = np.sum((df_mc['npv_$m'] - y_pred) ** 2)
+        ss_tot = np.sum((df_mc['npv_$m'] - df_mc['npv_$m'].mean()) ** 2)
+        r_squared = 1 - (ss_res / ss_tot)
+
+        # Calculate correlation coefficient
+        corr = df_mc[param].corr(df_mc['npv_$m'])
+
+        # Labels and title
+        ax.set_xlabel(label)
+        ax.set_ylabel('NPV ($M AUD)')
+        ax.set_title(f'R²={r_squared:.3f}, r={corr:+.3f}', fontsize=18)
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle(f'{region_name}: Parameter Sensitivity to NPV', fontsize=BIGGER_SIZE, y=0.995)
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_param_scatter_vs_npv_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ Multi-parameter scatter grid saved")
+    plt.close()
+
+    # Plot 9a: NPV vs H₂ Price (colored by WACC) - Financial Sensitivity
+    print(f"  Generating NPV scatter plots with interaction effects...")
+    fig, ax = plt.subplots(figsize=figure_size)
+
+    scatter = ax.scatter(df_mc['H2_PRICE'], df_mc['npv_$m'],
+                        c=df_mc['WACC'], cmap='plasma',
+                        alpha=0.5, s=25, edgecolors='none')
+
+    cbar = plt.colorbar(scatter, ax=ax, label='WACC (%)')
+
+    # Add trend line
+    z = np.polyfit(df_mc['H2_PRICE'], df_mc['npv_$m'], 1)
+    p = np.poly1d(z)
+    x_trend = np.linspace(df_mc['H2_PRICE'].min(), df_mc['H2_PRICE'].max(), 100)
+    ax.plot(x_trend, p(x_trend), 'r--', linewidth=2, label=f'Trend')
+
+    ax.set_xlabel('H₂ Selling Price ($/kg)')
+    ax.set_ylabel('NPV ($M AUD)')
+    ax.set_title(f'{region_name}: NPV vs H₂ Price (colored by WACC)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_npv_scatter_wacc_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # Plot 9b: NPV vs Efficiency (colored by CAPEX) - Technology-Cost Trade-off
+    fig, ax = plt.subplots(figsize=figure_size)
+
+    scatter = ax.scatter(df_mc['EFFICIENCY'], df_mc['npv_$m'],
+                        c=df_mc['CAPEX'], cmap='RdYlBu_r',
+                        alpha=0.5, s=25, edgecolors='none')
+
+    cbar = plt.colorbar(scatter, ax=ax, label='CAPEX ($/kW)')
+
+    # Add trend line
+    z = np.polyfit(df_mc['EFFICIENCY'], df_mc['npv_$m'], 1)
+    p = np.poly1d(z)
+    x_trend = np.linspace(df_mc['EFFICIENCY'].min(), df_mc['EFFICIENCY'].max(), 100)
+    ax.plot(x_trend, p(x_trend), 'r--', linewidth=2, label=f'Trend')
+
+    ax.set_xlabel('Efficiency (kWh/kg H₂)')
+    ax.set_ylabel('NPV ($M AUD)')
+    ax.set_title(f'{region_name}: NPV vs Efficiency (colored by CAPEX)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_npv_scatter_efficiency_capex_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # Plot 9c: NPV vs CAPEX (colored by Lifetime) - Durability Impact
+    fig, ax = plt.subplots(figsize=figure_size)
+
+    scatter = ax.scatter(df_mc['CAPEX'], df_mc['npv_$m'],
+                        c=df_mc['LIFETIME_HOURS'], cmap='viridis',
+                        alpha=0.5, s=25, edgecolors='none')
+
+    cbar = plt.colorbar(scatter, ax=ax, label='Lifetime (hours)')
+
+    # Add trend line
+    z = np.polyfit(df_mc['CAPEX'], df_mc['npv_$m'], 1)
+    p = np.poly1d(z)
+    x_trend = np.linspace(df_mc['CAPEX'].min(), df_mc['CAPEX'].max(), 100)
+    ax.plot(x_trend, p(x_trend), 'r--', linewidth=2, label=f'Trend')
+
+    ax.set_xlabel('CAPEX ($/kW)')
+    ax.set_ylabel('NPV ($M AUD)')
+    ax.set_title(f'{region_name}: NPV vs CAPEX (colored by Lifetime)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_npv_scatter_capex_lifetime_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ NPV scatter plots with interaction effects saved")
+    plt.close()
+
     print(f"  ✓ All Monte Carlo visualizations complete for {region_name}\n")
 
 # Generate visualizations for both regions
 plot_monte_carlo_distributions(df_mc_vic, 'VIC', results_path)
 plot_monte_carlo_distributions(df_mc_qld, 'QLD', results_path)
 
+# Plot 10: Regional Correlation Comparison - VIC vs QLD
+print(f"\nGenerating regional correlation comparison plot...")
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Calculate correlations with NPV for both regions
+params_comp = ['CAPEX', 'EFFICIENCY', 'H2_PRICE', 'LIFETIME_HOURS', 'VOM', 'WACC']
+corr_vic = df_mc_vic[params_comp].corrwith(df_mc_vic['npv_$m'])
+corr_qld = df_mc_qld[params_comp].corrwith(df_mc_qld['npv_$m'])
+
+# Set up bar positions
+x = np.arange(len(params_comp))
+width = 0.35
+
+# Create grouped bar chart
+bars1 = ax.bar(x - width/2, corr_vic, width, label='VIC', color='steelblue', alpha=0.8)
+bars2 = ax.bar(x + width/2, corr_qld, width, label='QLD', color='coral', alpha=0.8)
+
+# Add value labels on bars
+for bars in [bars1, bars2]:
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height,
+                f'{height:.3f}',
+                ha='center', va='bottom' if height > 0 else 'top',
+                fontsize=10, fontweight='bold')
+
+# Formatting
+ax.set_xlabel('Parameter')
+ax.set_ylabel('Correlation Coefficient with NPV')
+ax.set_title('Regional Comparison: Parameter Correlations with NPV')
+ax.set_xticks(x)
+ax.set_xticklabels(['CAPEX', 'Efficiency', 'H₂ Price', 'Lifetime', 'VOM', 'WACC'], rotation=45, ha='right')
+ax.axhline(y=0, color='black', linestyle='-', linewidth=0.8)
+ax.legend(loc='best')
+ax.grid(True, alpha=0.3, axis='y')
+
+plt.tight_layout()
+plt.savefig(os.path.join(results_path, 'mc_correlation_comparison_vic_qld.png'),
+            dpi=300, bbox_inches='tight')
+print(f"✓ Regional correlation comparison plot saved\n")
+plt.close()
+
 # Plot 7: Combined NPV CDF (Cumulative Distribution Function) - Both Regions
-print(f"\nGenerating combined NPV CDF plot for both regions...")
+print(f"Generating combined NPV CDF plot for both regions...")
 fig, ax = plt.subplots(figsize=figure_size)
 
 # Calculate CDF for VIC
