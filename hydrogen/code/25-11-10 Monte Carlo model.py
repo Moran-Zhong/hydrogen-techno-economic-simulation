@@ -1136,16 +1136,12 @@ fig, ax = plt.subplots(figsize=heatmap_size)
 # Pivot data for heatmap
 pivot_vic = df_grid_vic.pivot(index='H2_PRICE', columns='CAPEX', values='lcoh_$/kg')
 
-# Create heatmap
+# Create heatmap with explicit scale for consistency (industry-relevant LCOH range)
+# <$2.50/kg = excellent (green), $2.50-3.50/kg = acceptable (yellow), >$3.50/kg = challenging (red)
 im = ax.imshow(pivot_vic.values, cmap='RdYlGn_r', aspect='auto', origin='lower',
                extent=[pivot_vic.columns.min()-50, pivot_vic.columns.max()+50,
-                       pivot_vic.index.min()-0.25, pivot_vic.index.max()+0.25])
-
-# Add contour lines
-X, Y = np.meshgrid(pivot_vic.columns, pivot_vic.index)
-contours = ax.contour(X, Y, pivot_vic.values, levels=[2.5, 3.0, 4.0, 5.0],
-                      colors='black', linewidths=1.5, alpha=0.7)
-ax.clabel(contours, inline=True, fontsize=10, fmt='%.1f')
+                       pivot_vic.index.min()-0.25, pivot_vic.index.max()+0.25],
+               vmin=1.5, vmax=5.0)
 
 # Annotate cells with values
 for i, h2_price in enumerate(pivot_vic.index):
@@ -1291,14 +1287,11 @@ fig, ax = plt.subplots(figsize=heatmap_size)
 
 pivot_qld = df_grid_qld.pivot(index='H2_PRICE', columns='CAPEX', values='lcoh_$/kg')
 
+# Consistent scale with VIC for regional comparison
 im = ax.imshow(pivot_qld.values, cmap='RdYlGn_r', aspect='auto', origin='lower',
                extent=[pivot_qld.columns.min()-50, pivot_qld.columns.max()+50,
-                       pivot_qld.index.min()-0.25, pivot_qld.index.max()+0.25])
-
-X, Y = np.meshgrid(pivot_qld.columns, pivot_qld.index)
-contours = ax.contour(X, Y, pivot_qld.values, levels=[2.5, 3.0, 4.0, 5.0],
-                      colors='black', linewidths=1.5, alpha=0.7)
-ax.clabel(contours, inline=True, fontsize=10, fmt='%.1f')
+                       pivot_qld.index.min()-0.25, pivot_qld.index.max()+0.25],
+               vmin=1.5, vmax=5.0)
 
 for i, h2_price in enumerate(pivot_qld.index):
     for j, capex in enumerate(pivot_qld.columns):
@@ -1758,17 +1751,13 @@ def plot_monte_carlo_distributions(df_mc, region_name, results_path):
                 npv_grid[j, i] = np.nan
 
     # Plot heatmap with diverging colormap (red=negative, green=positive)
+    # Scale set to capture P10-P90 range across both regions for meaningful comparison
+    # VIC NPV range: ~1,925-10,312 $M; QLD NPV range: ~868-7,725 $M
+    vmin = 1500  # Below QLD P10 (1,770 $M)
+    vmax = 7500  # Above VIC P90 (7,072 $M)
     extent = [capex_bins[0], capex_bins[-1], h2_price_bins[0], h2_price_bins[-1]]
     im = ax.imshow(npv_grid, cmap='RdYlGn', aspect='auto', origin='lower',
-                   extent=extent, vmin=-100, vmax=100)
-
-    # Add contour lines for key NPV thresholds
-    X, Y = np.meshgrid(capex_bins[:-1] + np.diff(capex_bins)/2,
-                       h2_price_bins[:-1] + np.diff(h2_price_bins)/2)
-    contours = ax.contour(X, Y, npv_grid, levels=[0, 50, 100],
-                          colors=['black', 'darkgreen', 'darkgreen'],
-                          linewidths=[2.5, 1.5, 1.5], linestyles=['--', '-', '-'])
-    ax.clabel(contours, inline=True, fontsize=10, fmt='$%d M')
+                   extent=extent, vmin=vmin, vmax=vmax)
 
     # Colorbar
     cbar = plt.colorbar(im, ax=ax, label='NPV ($M AUD)')
@@ -1778,14 +1767,14 @@ def plot_monte_carlo_distributions(df_mc, region_name, results_path):
     ax.set_title(f'{region_name}: NPV Heatmap (CAPEX vs H₂ Price)\n25-year project, WACC=7%')
 
     # Add text annotations for key regions
-    ax.text(0.95, 0.05, 'HIGH RISK\n(Low price,\nHigh CAPEX)',
-            transform=ax.transAxes, ha='right', va='bottom',
-            bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7),
-            fontsize=9)
-    ax.text(0.05, 0.95, 'ATTRACTIVE\n(High price,\nLow CAPEX)',
-            transform=ax.transAxes, ha='left', va='top',
-            bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.7),
-            fontsize=9)
+    # ax.text(0.95, 0.05, 'HIGH RISK\n(Low price,\nHigh CAPEX)',
+    #         transform=ax.transAxes, ha='right', va='bottom',
+    #         bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7),
+    #         fontsize=9)
+    # ax.text(0.05, 0.95, 'ATTRACTIVE\n(High price,\nLow CAPEX)',
+    #         transform=ax.transAxes, ha='left', va='top',
+    #         bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.7),
+    #         fontsize=9)
 
     plt.tight_layout()
     plt.savefig(os.path.join(results_path, f'mc_npv_heatmap_capex_h2price_{region_name}.png'),
