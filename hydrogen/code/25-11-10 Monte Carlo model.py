@@ -1628,12 +1628,22 @@ def plot_monte_carlo_distributions(df_mc, region_name, results_path):
     results_path : str
         Directory to save plots
 
-    Creates 4 key visualizations:
-    ----------------------------
+    Creates 14 key visualizations:
+    ------------------------------
     1. LCOH Distribution Histogram
     2. NPV Distribution Histogram
     3. Convergence Plot (mean & std over iterations)
     4. Parameter Sensitivity Tornado Diagram
+    5. NPV Heatmap (CAPEX vs H₂ Price)
+    5b. LCOH Heatmap (CAPEX vs H₂ Price)
+    5c. LCOH Heatmap (Efficiency vs Lifetime)
+    5d. Utilization Distribution Histogram
+    5e. Utilization vs LCOH Scatter Plot
+    5f. Utilization Heatmap (CAPEX vs H₂ Price)
+    6. NPV Scatter Plot (H₂ Price vs NPV, colored by CAPEX)
+    7. Correlation Matrix Heatmap (NPV Focus)
+    8. Multi-Parameter Scatter Grid (6 parameters vs NPV)
+    9. NPV Scatter Plots with Interaction Effects (3 variants)
     """
     print(f"\nGenerating Monte Carlo visualizations for {region_name}...")
 
@@ -1780,6 +1790,227 @@ def plot_monte_carlo_distributions(df_mc, region_name, results_path):
     plt.savefig(os.path.join(results_path, f'mc_npv_heatmap_capex_h2price_{region_name}.png'),
                 dpi=300, bbox_inches='tight')
     print(f"  ✓ NPV heatmap saved")
+    plt.close()
+
+    # Plot 5b: LCOH Heatmap (CAPEX vs H₂ Price)
+    print(f"  Generating LCOH heatmap (CAPEX vs H₂ Price)...")
+    fig, ax = plt.subplots(figsize=heatmap_size)
+
+    # Create 2D grid bins (same as NPV heatmap for comparison)
+    capex_bins = np.linspace(600, 1400, 21)  # 20 bins
+    h2_price_bins = np.linspace(3.0, 6.0, 21)  # 20 bins
+
+    # Calculate mean LCOH for each bin
+    lcoh_grid = np.zeros((20, 20))
+    count_grid = np.zeros((20, 20))
+
+    for i in range(20):
+        for j in range(20):
+            mask = ((df_mc['CAPEX'] >= capex_bins[i]) &
+                    (df_mc['CAPEX'] < capex_bins[i+1]) &
+                    (df_mc['H2_PRICE'] >= h2_price_bins[j]) &
+                    (df_mc['H2_PRICE'] < h2_price_bins[j+1]))
+            count = mask.sum()
+            if count > 0:
+                lcoh_grid[j, i] = df_mc.loc[mask, 'lcoh_$/kg'].mean()
+                count_grid[j, i] = count
+            else:
+                lcoh_grid[j, i] = np.nan
+
+    # Plot heatmap with sequential colormap (low=good, high=bad for LCOH)
+    # Industry-relevant LCOH range: $2-8/kg
+    lcoh_p10 = df_mc['lcoh_$/kg'].quantile(0.10)
+    lcoh_p90 = df_mc['lcoh_$/kg'].quantile(0.90)
+    vmin = max(2.0, lcoh_p10 - 0.5)  # Floor at $2/kg
+    vmax = min(8.0, lcoh_p90 + 0.5)  # Cap at $8/kg
+    extent = [capex_bins[0], capex_bins[-1], h2_price_bins[0], h2_price_bins[-1]]
+    im = ax.imshow(lcoh_grid, cmap='RdYlGn_r', aspect='auto', origin='lower',
+                   extent=extent, vmin=vmin, vmax=vmax)
+
+    # Colorbar
+    cbar = plt.colorbar(im, ax=ax, label='LCOH ($/kg H₂)')
+
+    ax.set_xlabel('CAPEX ($/kW)')
+    ax.set_ylabel('H₂ Price ($/kg)')
+    ax.set_title(f'{region_name}: LCOH Heatmap (CAPEX vs H₂ Price)\nMonte Carlo Simulation (n={len(df_mc):,})')
+
+    # Add annotation for optimal region
+    # ax.text(0.05, 0.95, 'LOW LCOH\n(Low CAPEX,\nHigh H₂ Price)',
+    #         transform=ax.transAxes, ha='left', va='top',
+    #         bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.7),
+    #         fontsize=14)
+    # ax.text(0.95, 0.05, 'HIGH LCOH\n(High CAPEX,\nLow H₂ Price)',
+    #         transform=ax.transAxes, ha='right', va='bottom',
+    #         bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7),
+    #         fontsize=14)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_lcoh_heatmap_capex_h2price_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ LCOH heatmap (CAPEX vs H₂ Price) saved")
+    plt.close()
+
+    # Plot 5c: LCOH Heatmap (Efficiency vs Lifetime) - Technology Parameters
+    print(f"  Generating LCOH heatmap (Efficiency vs Lifetime)...")
+    fig, ax = plt.subplots(figsize=heatmap_size)
+
+    # Create 2D grid bins for technology parameters
+    efficiency_bins = np.linspace(45, 57, 21)  # 20 bins across thermodynamic range
+    lifetime_bins = np.linspace(60000, 100000, 21)  # 20 bins across industry range
+
+    # Calculate mean LCOH for each bin
+    lcoh_tech_grid = np.zeros((20, 20))
+
+    for i in range(20):
+        for j in range(20):
+            mask = ((df_mc['EFFICIENCY'] >= efficiency_bins[i]) &
+                    (df_mc['EFFICIENCY'] < efficiency_bins[i+1]) &
+                    (df_mc['LIFETIME_HOURS'] >= lifetime_bins[j]) &
+                    (df_mc['LIFETIME_HOURS'] < lifetime_bins[j+1]))
+            count = mask.sum()
+            if count > 0:
+                lcoh_tech_grid[j, i] = df_mc.loc[mask, 'lcoh_$/kg'].mean()
+            else:
+                lcoh_tech_grid[j, i] = np.nan
+
+    # Plot heatmap with region-specific fixed scaling
+    extent_tech = [efficiency_bins[0], efficiency_bins[-1], lifetime_bins[0], lifetime_bins[-1]]
+
+    # Use region-specific fixed color scales for consistent regional interpretation
+    if region_name == 'VIC':
+        vmin_tech = 1.5  # VIC lower LCOH range ($/kg)
+        vmax_tech = 2.4  # VIC upper LCOH range ($/kg)
+    else:  # QLD
+        vmin_tech = 2.0  # QLD lower LCOH range ($/kg)
+        vmax_tech = 3.4  # QLD upper LCOH range ($/kg)
+
+    # Use Spectral_r for better contrast (blue=low LCOH, red=high LCOH)
+    im = ax.imshow(lcoh_tech_grid, cmap='Spectral_r', aspect='auto', origin='lower',
+                   extent=extent_tech, vmin=vmin_tech, vmax=vmax_tech)
+
+    # Colorbar with fixed scale displayed
+    cbar = plt.colorbar(im, ax=ax, label=f'LCOH ($/kg H₂)')
+
+    ax.set_xlabel('Efficiency (kWh/kg H₂)')
+    ax.set_ylabel('Lifetime (hours)')
+    ax.set_title(f'{region_name}: LCOH Heatmap (Efficiency vs Lifetime)\nMonte Carlo Simulation (n={len(df_mc):,})')
+
+    # Add annotation for optimal region
+    # ax.text(0.05, 0.95, 'LOW LCOH\n(Low kWh/kg,\nLong Lifetime)',
+    #         transform=ax.transAxes, ha='left', va='top',
+    #         bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7),
+    #         fontsize=14)
+    # ax.text(0.95, 0.05, 'HIGH LCOH\n(High kWh/kg,\nShort Lifetime)',
+    #         transform=ax.transAxes, ha='right', va='bottom',
+    #         bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7),
+    #         fontsize=14)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_lcoh_heatmap_efficiency_lifetime_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ LCOH heatmap (Efficiency vs Lifetime) saved")
+    plt.close()
+
+    # Plot 5d: Utilization Distribution Histogram
+    print(f"  Generating utilization distribution plot...")
+    fig, ax = plt.subplots(figsize=figure_size)
+
+    ax.hist(df_mc['utilization_%'], bins=50, alpha=0.7, color='darkorange', edgecolor='black')
+    ax.axvline(df_mc['utilization_%'].mean(), color='red', linestyle='--', linewidth=2,
+               label=f"Mean: {df_mc['utilization_%'].mean():.1f}%")
+    ax.axvline(df_mc['utilization_%'].quantile(0.10), color='blue', linestyle=':', linewidth=2,
+               label=f"P10: {df_mc['utilization_%'].quantile(0.10):.1f}%")
+    ax.axvline(df_mc['utilization_%'].quantile(0.90), color='green', linestyle=':', linewidth=2,
+               label=f"P90: {df_mc['utilization_%'].quantile(0.90):.1f}%")
+
+    ax.set_xlabel('Utilization Factor (%)')
+    ax.set_ylabel('Frequency (# of Iterations)')
+    ax.set_title(f'{region_name}: Utilization Distribution (Monte Carlo, n={len(df_mc):,})')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_utilization_distribution_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ Utilization distribution plot saved")
+    plt.close()
+
+    # Plot 5e: Utilization vs LCOH Scatter Plot
+    print(f"  Generating utilization vs LCOH scatter plot...")
+    fig, ax = plt.subplots(figsize=figure_size)
+
+    # Create scatter plot with H₂ price as color dimension
+    scatter = ax.scatter(df_mc['utilization_%'], df_mc['lcoh_$/kg'],
+                        c=df_mc['H2_PRICE'], cmap='viridis',
+                        alpha=0.5, s=20, edgecolors='none')
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=ax, label='H₂ Price ($/kg)')
+
+    # Add trend line
+    z = np.polyfit(df_mc['utilization_%'], df_mc['lcoh_$/kg'], 1)
+    p = np.poly1d(z)
+    x_trend = np.linspace(df_mc['utilization_%'].min(), df_mc['utilization_%'].max(), 100)
+    ax.plot(x_trend, p(x_trend), 'r-', linewidth=2,
+            label=f'Trend: LCOH = {z[0]:.4f}×Util {z[1]:+.2f}')
+
+    # Calculate correlation
+    corr = df_mc['utilization_%'].corr(df_mc['lcoh_$/kg'])
+    r_squared = corr**2
+
+    ax.set_xlabel('Utilization Factor (%)')
+    ax.set_ylabel('LCOH ($/kg H₂)')
+    ax.set_title(f'{region_name}: Utilization vs LCOH (R²={r_squared:.3f}, r={corr:+.3f})')
+    ax.legend(loc='best')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_utilization_vs_lcoh_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ Utilization vs LCOH scatter plot saved")
+    plt.close()
+
+    # Plot 5f: Utilization Heatmap (CAPEX vs H₂ Price)
+    print(f"  Generating utilization heatmap (CAPEX vs H₂ Price)...")
+    fig, ax = plt.subplots(figsize=heatmap_size)
+
+    # Calculate mean utilization for each bin (reuse bins from earlier)
+    util_grid = np.zeros((20, 20))
+
+    for i in range(20):
+        for j in range(20):
+            mask = ((df_mc['CAPEX'] >= capex_bins[i]) &
+                    (df_mc['CAPEX'] < capex_bins[i+1]) &
+                    (df_mc['H2_PRICE'] >= h2_price_bins[j]) &
+                    (df_mc['H2_PRICE'] < h2_price_bins[j+1]))
+            count = mask.sum()
+            if count > 0:
+                util_grid[j, i] = df_mc.loc[mask, 'utilization_%'].mean()
+            else:
+                util_grid[j, i] = np.nan
+
+    # Plot heatmap with sequential colormap (higher utilization = better)
+    extent = [capex_bins[0], capex_bins[-1], h2_price_bins[0], h2_price_bins[-1]]
+    im = ax.imshow(util_grid, cmap='YlGnBu', aspect='auto', origin='lower',
+                   extent=extent, vmin=0, vmax=100)
+
+    # Colorbar
+    cbar = plt.colorbar(im, ax=ax, label='Utilization Factor (%)')
+
+    ax.set_xlabel('CAPEX ($/kW)')
+    ax.set_ylabel('H₂ Price ($/kg)')
+    ax.set_title(f'{region_name}: Utilization Heatmap (CAPEX vs H₂ Price)\nMonte Carlo Simulation (n={len(df_mc):,})')
+
+    # Add annotation - utilization driven by H2 price threshold
+    # ax.text(0.5, 0.05, 'Note: Utilization primarily driven by H₂ price relative to electricity costs',
+    #         transform=ax.transAxes, ha='center', va='bottom',
+    #         bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8),
+    #         fontsize=12)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_path, f'mc_utilization_heatmap_capex_h2price_{region_name}.png'),
+                dpi=300, bbox_inches='tight')
+    print(f"  ✓ Utilization heatmap (CAPEX vs H₂ Price) saved")
     plt.close()
 
     # Plot 6: NPV Scatter Plot (H₂ Price vs NPV, colored by CAPEX)
@@ -2157,7 +2388,26 @@ def analyze_monte_carlo_results(df_mc, region_name):
     print(f"\nUtilization Factor Distribution (%):")
     print(f"  Mean:      {df_mc['utilization_%'].mean():.1f}%")
     print(f"  Median:    {df_mc['utilization_%'].median():.1f}%")
-    print(f"  P10-P90:   {df_mc['utilization_%'].quantile(0.10):.1f}% - {df_mc['utilization_%'].quantile(0.90):.1f}%")
+    print(f"  Std Dev:   {df_mc['utilization_%'].std():.1f}%")
+    print(f"  Min:       {df_mc['utilization_%'].min():.1f}%")
+    print(f"  Max:       {df_mc['utilization_%'].max():.1f}%")
+    print(f"  P10:       {df_mc['utilization_%'].quantile(0.10):.1f}% (pessimistic)")
+    print(f"  P50:       {df_mc['utilization_%'].quantile(0.50):.1f}% (median)")
+    print(f"  P90:       {df_mc['utilization_%'].quantile(0.90):.1f}% (optimistic)")
+
+    # Utilization context
+    util_mean = df_mc['utilization_%'].mean()
+    if util_mean < 20:
+        util_status = "✗ VERY LOW - poor economics, high LCOH expected"
+    elif util_mean < 40:
+        util_status = "⚠ LOW - typical for price-arbitrage with conservative thresholds"
+    elif util_mean < 60:
+        util_status = "✓ MODERATE - typical for grid-connected price-arbitrage operation"
+    elif util_mean < 80:
+        util_status = "✓ GOOD - favorable price conditions or renewable-powered"
+    else:
+        util_status = "✓ EXCELLENT - near-baseload operation, likely renewable-powered"
+    print(f"\n  Assessment: {util_status}")
 
     # Convergence Check
     print(f"\nConvergence Assessment:")
